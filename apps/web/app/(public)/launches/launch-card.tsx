@@ -17,6 +17,13 @@ const isValidProvider = (
   return provider === 'github' || provider === 'gitlab';
 };
 
+const LinkOrNoLink = (props: { href: string; children: React.ReactNode; className?: string }) => {
+  if (props.href) {
+    return <Link {...props} />;
+  }
+  return <div {...props} />;
+};
+
 const getRankBadge = (index: number) => {
   if (index === 0)
     return { text: '1st Place', color: 'from-0% from-yellow-600/30 via-10%  to-transparent' };
@@ -126,7 +133,10 @@ export default function LaunchCard({ project, index }: { project: any; index?: n
 
       <div>
         <div className="flex items-center justify-between pt-1">
-          <div className="flex h-full items-center gap-2 pl-2">
+          <LinkOrNoLink
+            href={`/profile/${project.owner?.id}`}
+            className="flex h-full items-center gap-2 pl-2"
+          >
             {project.owner?.image ? (
               <Image
                 src={project.owner?.image}
@@ -142,7 +152,7 @@ export default function LaunchCard({ project, index }: { project: any; index?: n
               <p className="text-sm font-medium text-white">{project.owner?.name}</p>
               <p className="text-xs text-neutral-400">/{project.owner?.username}</p>
             </div>
-          </div>
+          </LinkOrNoLink>
           <div className="flex items-center gap-4 text-xs md:text-sm">
             <div className="flex flex-row items-center gap-4">
               <div className="flex items-center gap-1">

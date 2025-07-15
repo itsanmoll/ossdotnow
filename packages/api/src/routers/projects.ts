@@ -1,8 +1,8 @@
 import { categoryProjectStatuses, categoryProjectTypes, categoryTags } from '@workspace/db/schema';
+import { APPROVAL_STATUS, resolveAllIds, updateProjectRepoStats } from '../utils/project-helpers';
 import { adminProcedure, createTRPCRouter, protectedProcedure, publicProcedure } from '../trpc';
 import { account, project, projectClaim, projectTagRelations } from '@workspace/db/schema';
 import { and, asc, count, desc, eq, or, ilike, inArray } from 'drizzle-orm';
-import { APPROVAL_STATUS, resolveAllIds } from '../utils/project-helpers';
 import { projectProviderEnum } from '@workspace/db/schema';
 import { PROVIDER_URL_PATTERNS } from '../utils/constants';
 import { getActiveDriver } from '../driver/utils';
@@ -149,45 +149,32 @@ export const projectsRouter = createTRPCRouter({
       const [totalCountResult] = await countQuery;
 
       const orderByClause = [];
-      if(!searchQuery){
+      if (!searchQuery) {
         orderByClause.push(desc(project.isPinned));
       }
 
-    if (searchQuery) {
-          const lowerSearchQuery = searchQuery.toLowerCase();
+      if (searchQuery) {
+        const lowerSearchQuery = searchQuery.toLowerCase();
 
-          orderByClause.push(
-            desc(ilike(project.name, searchQuery))
-          );
+        orderByClause.push(desc(ilike(project.name, searchQuery)));
 
-          orderByClause.push(
-            desc(ilike(project.name, `${searchQuery}%`))
-          );
+        orderByClause.push(desc(ilike(project.name, `${searchQuery}%`)));
 
-          orderByClause.push(
-            desc(ilike(project.name, `%${searchQuery}%`))
-          );
+        orderByClause.push(desc(ilike(project.name, `%${searchQuery}%`)));
 
-          orderByClause.push(
-            desc(ilike(project.gitRepoUrl, `%${searchQuery}%`))
-          );
-        }
+        orderByClause.push(desc(ilike(project.gitRepoUrl, `%${searchQuery}%`)));
+      }
 
       switch (sortBy) {
         case 'name':
           orderByClause.push(asc(project.name));
           break;
         case 'stars':
-          // TODO: Add stars count to project data
-          // For now, fallback to recent
-          orderByClause.push(desc(project.createdAt));
+          orderByClause.push(desc(project.stars));
           break;
         case 'forks':
-          // TODO: Add forks count to project data
-          // For now, fallback to recent
-          orderByClause.push(desc(project.createdAt));
+          orderByClause.push(desc(project.forks));
           break;
-        case 'recent':
         default:
           orderByClause.push(desc(project.createdAt));
           break;
@@ -298,8 +285,8 @@ export const projectsRouter = createTRPCRouter({
         },
       };
     }),
-  getProject: publicProcedure.input(z.object({ id: z.string() })).query(({ ctx, input }) => {
-    return ctx.db.query.project.findFirst({
+  getProject: publicProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+    const foundProject = await ctx.db.query.project.findFirst({
       where: eq(project.id, input.id),
       with: {
         status: true,
@@ -311,35 +298,42 @@ export const projectsRouter = createTRPCRouter({
         },
       },
     });
-  }),
-  addProject: protectedProcedure.input(createProjectInput).mutation(async ({ ctx, input }) => {
-    const { statusId, typeId, tagIds } = await resolveAllIds(ctx.db, {
-      status: input.status,
-      type: input.type,
-      tags: input.tags,
-    });
 
-    return await ctx.db.transaction(async (tx) => {
-      const [newProject] = await tx
-        .insert(project)
-        .values({
-          ...input,
-          ownerId: ctx.session.userId,
-          statusId,
-          typeId,
-        })
-        .returning();
+    if (!foundProject) {
+      return null;
+    }
 
-      if (tagIds.length > 0 && newProject?.id) {
-        const tagRelations = tagIds.map((tagId: string) => ({
-          projectId: newProject.id as string,
-          tagId: tagId as string,
-        }));
-        await tx.insert(projectTagRelations).values(tagRelations);
-      }
+    // Check if project data is stale (more than 24 hours old)
+    const now = new Date();
+    const lastUpdate = new Date(foundProject.updatedAt);
+    const hoursSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60);
 
-      return newProject;
-    });
+    if (hoursSinceUpdate > 24 && foundProject.gitRepoUrl && foundProject.gitHost) {
+      // Update stars and forks from repository API
+      await updateProjectRepoStats(
+        ctx.db,
+        foundProject.id,
+        foundProject.gitRepoUrl,
+        foundProject.gitHost as (typeof projectProviderEnum.enumValues)[number],
+        ctx as Context,
+      );
+
+      // Fetch the updated project
+      return await ctx.db.query.project.findFirst({
+        where: eq(project.id, input.id),
+        with: {
+          status: true,
+          type: true,
+          tagRelations: {
+            with: {
+              tag: true,
+            },
+          },
+        },
+      });
+    }
+
+    return foundProject;
   }),
   updateProject: protectedProcedure.input(createProjectInput).mutation(async ({ ctx, input }) => {
     if (!input.id) throw new Error('Project ID is required for update');
@@ -581,6 +575,17 @@ export const projectsRouter = createTRPCRouter({
           verifyContext,
           input.projectId,
         );
+
+        if (result.success && result.project) {
+          await updateProjectRepoStats(
+            ctx.db,
+            result.project.id,
+            result.project.gitRepoUrl,
+            provider,
+            ctx as Context,
+          );
+        }
+
         return result;
       } catch (error) {
         if (error instanceof TRPCError) {

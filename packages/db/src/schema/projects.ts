@@ -1,4 +1,14 @@
-import { boolean, jsonb, pgEnum, pgTable, text, timestamp, uuid, index } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+  index,
+  integer,
+} from 'drizzle-orm/pg-core';
 import { categoryTags, categoryProjectTypes, categoryProjectStatuses } from './categories';
 import { projectCompetitors } from './project-competitors';
 import { gitHostEnum } from './shared-enums';
@@ -49,6 +59,9 @@ export const project = pgTable(
     isPinned: boolean('is_pinned').notNull().default(false),
     acquiredBy: uuid('acquired_by').references(() => competitor.id, { onDelete: 'set null' }),
 
+    stars: integer('stars').notNull().default(0),
+    forks: integer('forks').notNull().default(0),
+
     deletedAt: timestamp('deleted_at', { mode: 'date' }),
     createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true })
@@ -59,7 +72,7 @@ export const project = pgTable(
   (table) => [
     index('project_status_id_idx').on(table.statusId),
     index('project_type_id_idx').on(table.typeId),
-],
+  ],
 );
 export const projectTagRelations = pgTable(
   'project_tag_relations',

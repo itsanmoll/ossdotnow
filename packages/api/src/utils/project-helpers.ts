@@ -1,6 +1,9 @@
 import { categoryProjectTypes, categoryProjectStatuses, categoryTags } from '@workspace/db/schema';
-import { eq, inArray } from 'drizzle-orm';
+import { projectProviderEnum } from '@workspace/db/schema';
+import { getActiveDriver } from '../driver/utils';
+import type { createTRPCContext } from '../trpc';
 import { project } from '@workspace/db/schema';
+import { eq, inArray } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import { type DB } from '@workspace/db';
 export const APPROVAL_STATUS = {
@@ -98,4 +101,36 @@ export async function resolveAllIds(
     typeId,
     tagIds,
   };
+}
+
+type TRPCContext = Awaited<ReturnType<typeof createTRPCContext>>;
+
+export async function updateProjectRepoStats(
+  db: DB,
+  projectId: string,
+  gitRepoUrl: string,
+  provider: (typeof projectProviderEnum.enumValues)[number],
+  ctx: TRPCContext,
+) {
+  try {
+    const driver = await getActiveDriver(provider, ctx);
+    const repoData = await driver.getRepo(gitRepoUrl);
+
+    const stars = repoData.stargazers_count || repoData.star_count || 0;
+    const forks = repoData.forks_count || 0;
+
+    await db
+      .update(project)
+      .set({
+        stars,
+        forks,
+        updatedAt: new Date(),
+      })
+      .where(eq(project.id, projectId));
+
+    return { stars, forks };
+  } catch (error) {
+    console.error('Failed to update repository stats:', error);
+    return null;
+  }
 }

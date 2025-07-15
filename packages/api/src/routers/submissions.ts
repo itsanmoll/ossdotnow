@@ -1,6 +1,12 @@
-import { APPROVAL_STATUS, checkProjectDuplicate, resolveAllIds } from '../utils/project-helpers';
+import {
+  APPROVAL_STATUS,
+  checkProjectDuplicate,
+  resolveAllIds,
+  updateProjectRepoStats,
+} from '../utils/project-helpers';
 import { project, projectTagRelations, projectClaim } from '@workspace/db/schema';
 import { createTRPCRouter, publicProcedure } from '../trpc';
+import { projectProviderEnum } from '@workspace/db/schema';
 import { getRateLimiter } from '../utils/rate-limit';
 import { createInsertSchema } from 'drizzle-zod';
 import { type Context } from '../driver/utils';
@@ -95,7 +101,7 @@ export const submissionRouter = createTRPCRouter({
     });
 
     // Wrap only the atomic database operations in a transaction
-    return await ctx.db.transaction(async (tx) => {
+    const result = await ctx.db.transaction(async (tx) => {
       const [newProject] = await tx
         .insert(project)
         .values({
@@ -154,9 +160,24 @@ export const submissionRouter = createTRPCRouter({
 
       const [totalCount] = await tx.select({ count: count() }).from(project);
       return {
+        newProject,
         count: totalCount?.count ?? 0,
       };
     });
+
+    if (result.newProject && input.gitRepoUrl && input.gitHost) {
+      await updateProjectRepoStats(
+        ctx.db,
+        result.newProject.id,
+        input.gitRepoUrl,
+        input.gitHost as (typeof projectProviderEnum.enumValues)[number],
+        ctx as Context,
+      );
+    }
+
+    return {
+      count: result.count,
+    };
   }),
   getSubmissionsCount: publicProcedure.query(async ({ ctx }) => {
     const submissionsCount = await ctx.db.select({ count: count() }).from(project);

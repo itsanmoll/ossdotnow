@@ -53,21 +53,8 @@ export default function ProjectsPage() {
     }),
   );
 
-  const { data: featuredProjects } = useQuery(
-    trpc.projects.getProjects.queryOptions({
-      approvalStatus: 'approved',
-      page: 1,
-      pageSize: 4,
-      searchQuery: searchQuery || undefined,
-      statusFilter: statusFilter === 'all' ? undefined : statusFilter,
-      typeFilter: typeFilter === 'all' ? undefined : typeFilter,
-      tagFilter: tagFilter === 'all' ? undefined : tagFilter,
-      sortBy: sortBy as 'recent' | 'name' | 'stars' | 'forks' | undefined,
-    }),
-  );
-
-  const projects = data?.data || [];
-  const pinnedProjects = featuredProjects?.data?.filter((p) => p.isPinned) || [];
+  const projects = data?.data.filter((p) => !p.isPinned) || [];
+  const pinnedProjects = data?.data.filter((p) => p.isPinned) || [];
 
   const hasActiveFilters =
     searchQuery || statusFilter !== 'all' || typeFilter !== 'all' || tagFilter !== 'all';
